@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="完全本地运行的纯色色块化与边界描线工具。" />
+    <title>Clear Region Outliner</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Clear Region Outliner 首页">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img"><path d="M6 5h20v5H11v12h15v5H6z"/><path d="M15 13h11v6H15z"/></svg>
+          </span>
+          <span class="brand-type"><strong>CLEAR REGION</strong><span>OUTLINER / 01</span></span>
+        </a>
+        <div class="privacy-note">
+          <span class="signal-dot" aria-hidden="true"></span>
+          <span><strong>本地处理</strong><small>图片不会离开浏览器</small></span>
+        </div>
+        <button class="icon-button compact-only" id="mobileSettings" type="button" aria-label="打开参数">
+          <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/></svg>
+        </button>
+      </header>
+
+      <main class="workspace">
+        <aside class="panel controls-panel" id="controlsPanel">
+          <div class="panel-heading">
+            <span class="eyebrow">01 / INPUT</span>
+            <button class="icon-button compact-only" id="closeSettings" type="button" aria-label="关闭参数">×</button>
+          </div>
+
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <button class="drop-zone" id="dropZone" type="button">
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 14v5h14v-5"/></svg>
+            </span>
+            <span><strong>放入一张图片</strong><small>PNG · JPEG · WEBP / 最大 4096²</small></span>
+            <span class="browse-label">选择文件</span>
+          </button>
+
+          <div class="sample-row" aria-label="内置样图">
+            <span>试试样图</span>
+            <button type="button" data-sample="landscape">风景</button>
+            <button type="button" data-sample="portrait">角色</button>
+            <button type="button" data-sample="gradient">渐变</button>
+          </div>
+
+          <section class="control-section">
+            <div class="section-title-row">
+              <span class="eyebrow">02 / METHOD</span>
+              <label class="switch-control">
+                <span id="autoModeLabel">自动估计</span>
+                <input id="autoMode" type="checkbox" checked />
+                <span class="switch-track" aria-hidden="true"><span></span></span>
+              </label>
+            </div>
+            <p class="section-copy" id="modeDescription">从图片的相邻色差与噪声分布估计实际参数。</p>
+
+            <div class="parameter-list">
+              <label class="parameter-row method-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-segmentation-method">
+                    <strong>分割方法</strong>
+                    <span class="parameter-tooltip" id="tip-segmentation-method" role="tooltip">
+                      <span><b>现有方法</b>：沿用原来的稳定管线，结果与之前一致。</span>
+                      <span><b>FH + RAG（实验）</b>：偏向保留细节，用于观察分区上限。</span>
+                      <span><b>多尺度融合（实验）</b>：高阈值粗层负责干净，低阈值细层只恢复有明确边界证据的字孔、高光和小图标。</span>
+                      <em>这里只切换算法，不会自动改动你的其他参数。</em>
+                    </span>
+                  </span>
+                  <small>稳定管线 / 拓扑保护实验</small>
+                </span>
+                <select id="segmentationMethod"><option value="existing">现有方法</option><option value="fh-rag">FH + RAG（实验）</option><option value="hierarchical-fusion">多尺度融合（实验）</option></select>
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-local-threshold">
+                    <strong>局部色差</strong>
+                    <span class="parameter-tooltip" id="tip-local-threshold" role="tooltip">
+                      <span>决定两个直接相邻的像素，色差多大时仍允许连接。</span>
+                      <span><b>调大</b>：更多近似颜色合成一块，噪点减少，但细边缘可能消失。</span>
+                      <span><b>调小</b>：保留更多细节与色差，但更容易产生碎块。</span>
+                    </span>
+                  </span>
+                  <small>相邻像素阈值 · ΔOK × 100</small>
+                </span>
+                <input id="localThreshold" type="number" min="0" max="100" step="0.1" value="2.4" />
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-global-threshold">
+                    <strong>全局色差</strong>
+                    <span class="parameter-tooltip" id="tip-global-threshold" role="tooltip">
+                      <span>限制同一个区域内部允许出现的整体颜色跨度，防止渐变无限连成一片。</span>
+                      <span><b>调大</b>：区域可容纳更宽的颜色变化，色块更少，但不同结构更容易合并。</span>
+                      <span><b>调小</b>：更早切开渐变，边界更保守，但区域数量会增加。</span>
+                      <em>必须大于或等于局部色差。</em>
+                    </span>
+                  </span>
+                  <small>区域跨度上限 · ΔOK × 100</small>
+                </span>
+                <input id="globalThreshold" type="number" min="0" max="100" step="0.1" value="6" />
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-min-region-area">
+                    <strong>最小色块</strong>
+                    <span class="parameter-tooltip" id="tip-min-region-area" role="tooltip">
+                      <span>面积小于这个像素数的区域会进入清理候选，但不会被无条件删除。</span>
+                      <span><b>调大</b>：清理更多小色块，画面更简洁，也更可能丢失小字和高光。</span>
+                      <span><b>调小</b>：保留更多细节，同时也会保留更多噪点。</span>
+                    </span>
+                  </span>
+                  <small>原图像素数</small>
+                </span>
+                <input id="minRegionArea" type="number" min="1" max="1000000" step="1" value="9" />
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-inner-area-ratio">
+                    <strong>剩余面积</strong>
+                    <span class="parameter-tooltip" id="tip-inner-area-ratio" role="tooltip">
+                      <span>模拟按当前线宽描边后，一个区域至少应剩下多少内部面积；低于此比例会进入清理候选。</span>
+                      <span><b>调大</b>：细小、狭长区域更容易被清理，画面更干净但可能损失字孔和细线。</span>
+                      <span><b>调小</b>：更容易保留细线与小孔，也可能留下细碎区域。</span>
+                    </span>
+                  </span>
+                  <small>描线后最少保留比例</small>
+                </span>
+                <span class="input-suffix"><input id="minInnerAreaRatio" type="number" min="0" max="100" step="1" value="80" /><i>%</i></span>
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-outline-width">
+                    <strong>描边宽度</strong>
+                    <span class="parameter-tooltip" id="tip-outline-width" role="tooltip">
+                      <span>控制最终 PNG 中边界线实际占用的原图像素宽度。</span>
+                      <span><b>调大</b>：轮廓更醒目，但窄缝、小孔和细色块更容易被线条覆盖。</span>
+                      <span><b>调小</b>：保留更多精细结构，但轮廓可能不够突出。</span>
+                    </span>
+                  </span>
+                  <small>原图像素 · 1–8</small>
+                </span>
+                <span class="stepper"><button type="button" data-step="outlineWidth" data-delta="-1">−</button><input id="outlineWidth" type="number" min="1" max="8" step="1" value="2" /><button type="button" data-step="outlineWidth" data-delta="1">+</button></span>
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-outline-color">
+                    <strong>描边颜色</strong>
+                    <span class="parameter-tooltip" id="tip-outline-color" role="tooltip">
+                      <span>指定所有边界像素使用的精确 RGB 颜色，只改变线条颜色，不改变区域划分。</span>
+                      <span><b>更深</b>：轮廓对比更强，更接近传统线稿。</span>
+                      <span><b>更浅</b>：轮廓更柔和，但在浅色区域上可能不明显。</span>
+                    </span>
+                  </span>
+                  <small>导出使用精确 RGB</small>
+                </span>
+                <span class="color-control"><input id="outlineColor" type="color" value="#151515" /><code id="outlineColorText">#151515</code></span>
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-pre-smooth">
+                    <strong>预处理平滑</strong>
+                    <span class="parameter-tooltip" id="tip-pre-smooth" role="tooltip">
+                      <span>在分割前轻度抑制局部颜色波动；只影响分区判断，不直接模糊最终填充颜色。</span>
+                      <span><b>调大</b>：纹理和噪点更容易合并，但细小真实边界也可能被软化。</span>
+                      <span><b>调小</b>：更忠实保留原始变化，但可能产生更多小区域。</span>
+                    </span>
+                  </span>
+                  <small>仅用于分割判断 · 0–5</small>
+                </span>
+                <input id="preSmoothLevel" type="number" min="0" max="5" step="1" value="0" />
+              </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-connectivity">
+                    <strong>邻接方式</strong>
+                    <span class="parameter-tooltip" id="tip-connectivity" role="tooltip">
+                      <span>决定哪些像素算作直接相邻：4 邻接只看上下左右，8 邻接还包含四个对角方向。</span>
+                      <span><b>4 邻接</b>：更保守，接触角上的区域仍可保持分开。</span>
+                      <span><b>8 邻接</b>：对角接触也能连通，碎块更少，但可能通过角点连成一片。</span>
+                    </span>
+                  </span>
+                  <small>区域连通性</small>
+                </span>
+                <select id="connectivity"><option value="4">4 邻接</option><option value="8">8 邻接</option></select>
+              </label>
+            </div>
+            <p class="validation-message" id="validationMessage" role="alert"></p>
+          </section>
+
+          <div class="action-stack">
+            <button class="primary-action" id="processButton" type="button" disabled>
+              <span>开始处理</span>
+              <svg viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></svg>
+            </button>
+            <div class="secondary-actions">
+              <button id="resetButton" type="button">重置参数</button>
+              <button id="downloadButton" type="button" disabled>下载 PNG</button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="canvas-stage" aria-label="图像预览">
+          <div class="stage-toolbar">
+            <div class="view-tabs" role="tablist" aria-label="预览类型">
+              <button class="active" type="button" data-view="original">原图</button>
+              <button type="button" data-view="flat">纯色化</button>
+              <button type="button" data-view="boundary">边界图</button>
+              <button type="button" data-view="final">最终结果</button>
+            </div>
+            <div class="preview-tools">
+              <label class="compare-toggle"><input id="compareMode" type="checkbox" checked /><span>对比</span></label>
+              <button class="icon-button" id="zoomOut" type="button" aria-label="缩小">−</button>
+              <output id="zoomValue">100%</output>
+              <button class="icon-button" id="zoomIn" type="button" aria-label="放大">+</button>
+              <button class="icon-button" id="zoomFit" type="button" aria-label="适应窗口">
+                <svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="canvas-viewport" id="canvasViewport">
+            <div class="empty-state" id="emptyState">
+              <div class="empty-art" aria-hidden="true">
+                <svg viewBox="0 0 180 150">
+                  <path d="M23 119 63 70l28 29 21-27 45 47Z" fill="#c9ff54" stroke="currentColor" stroke-width="4"/>
+                  <circle cx="124" cy="42" r="15" fill="#ff795e" stroke="currentColor" stroke-width="4"/>
+                  <path d="M19 16h43M19 26h25M136 129h23" stroke="currentColor" stroke-width="4"/>
+                </svg>
+              </div>
+              <span class="empty-index">00</span>
+              <h1>把渐变与噪声<br/>变成清晰色块</h1>
+              <p>上传图片，或先用内置样图看看分区、清理与描线的完整流程。</p>
+              <button id="emptyUploadButton" type="button">选择一张图片</button>
+            </div>
+
+            <div class="canvas-wrap" id="canvasWrap" hidden>
+              <canvas id="baseCanvas"></canvas>
+              <canvas id="resultCanvas"></canvas>
+              <div class="compare-divider" id="compareDivider"><span>↔</span></div>
+            </div>
+          </div>
+
+          <div class="stage-footer">
+            <div class="progress-copy">
+              <span class="status-icon" id="statusIcon"></span>
+              <span><strong id="statusTitle">等待图片</strong><small id="statusDetail">所有处理都在当前设备完成</small></span>
+            </div>
+            <div class="progress-track" aria-hidden="true"><span id="progressBar"></span></div>
+            <span class="progress-value" id="progressValue">0%</span>
+          </div>
+        </section>
+
+        <aside class="panel stats-panel">
+          <div class="panel-heading">
+            <span class="eyebrow">03 / INSPECT</span>
+            <span class="result-state" id="resultState">NO INPUT</span>
+          </div>
+          <div class="file-summary">
+            <span class="thumbnail" id="thumbnail"><svg viewBox="0 0 32 32"><path d="M5 25 13 15l5 5 4-5 5 10Z"/><circle cx="22" cy="9" r="3"/></svg></span>
+            <span><strong id="fileName">尚未选择图片</strong><small id="fileMeta">—</small></span>
+          </div>
+
+          <section class="stat-section">
+            <h2>处理统计</h2>
+            <dl class="stat-grid">
+              <div><dt>初始区域</dt><dd id="initialRegions">—</dd></div>
+              <div><dt>最终区域</dt><dd id="finalRegions">—</dd></div>
+              <div><dt>已清理碎块</dt><dd id="mergedRegions">—</dd></div>
+              <div><dt>边界像素</dt><dd id="boundaryPixels">—</dd></div>
+            </dl>
+            <div class="elapsed-row"><span>本次用时</span><strong id="elapsedTime">—</strong></div>
+          </section>
+
+          <section class="stat-section effective-section">
+            <h2>实际生效参数</h2>
+            <dl class="effective-list" id="effectiveList">
+              <div><dt>局部 / 全局色差</dt><dd>—</dd></div>
+              <div><dt>最小色块 / 剩余比例</dt><dd>—</dd></div>
+              <div><dt>线宽 / 平滑 / 邻接</dt><dd>—</dd></div>
+            </dl>
+          </section>
+
+          <section class="stat-section warnings-section">
+            <h2>质量提示 <span id="warningCount">0</span></h2>
+            <ul id="warningsList"><li class="muted">处理后会在这里显示核验结果。</li></ul>
+          </section>
+
+          <div class="integrity-card">
+            <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>
+            <span><strong>像素级纯色约束</strong><small>非边界区域逐字节校验</small></span>
+            <span id="integrityState">—</span>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

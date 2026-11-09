@@ -1,0 +1,15 @@
+{
+  "name": "clear-region-outliner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first flat-color region segmentation and outline tool.",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "fixtures": "node tests/generate-fixtures.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
