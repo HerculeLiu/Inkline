@@ -4,12 +4,13 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const port = Number(process.env.CLEAR_REGION_PORT || 4173);
+const port = Number(process.env.INKLINE_PORT || process.env.CLEAR_REGION_PORT || 4173);
 const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
+  ".wasm": "application/wasm",
   ".png": "image/png",
   ".svg": "image/svg+xml"
 };
@@ -29,5 +30,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`Clear Region Outliner: http://127.0.0.1:${port}`);
+  console.log(`Inkline: http://127.0.0.1:${port}`);
 });

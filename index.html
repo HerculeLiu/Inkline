@@ -3,18 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="完全本地运行的纯色色块化与边界描线工具。" />
-    <title>Clear Region Outliner</title>
+    <meta name="description" content="Inkline：完全本地运行的纯色色块化、旧描边处理与曲线重绘工具。" />
+    <title>Inkline</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="#" aria-label="Clear Region Outliner 首页">
+        <a class="brand" href="#" aria-label="Inkline 首页">
           <span class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" role="img"><path d="M6 5h20v5H11v12h15v5H6z"/><path d="M15 13h11v6H15z"/></svg>
           </span>
-          <span class="brand-type"><strong>CLEAR REGION</strong><span>OUTLINER / 01</span></span>
+          <span class="brand-type"><strong>INKLINE</strong><span>LOCAL IMAGE TOOL / 01</span></span>
         </a>
         <div class="privacy-note">
           <span class="signal-dot" aria-hidden="true"></span>
@@ -65,7 +65,8 @@
                   <span class="parameter-help" tabindex="0" aria-describedby="tip-segmentation-method">
                     <strong>分割方法</strong>
                     <span class="parameter-tooltip" id="tip-segmentation-method" role="tooltip">
-                      <span><b>现有方法</b>：沿用原来的稳定管线，结果与之前一致。</span>
+                      <span><b>Inkline 曲线</b>：VTracer Poster + Cutout + Spline，共享边界并重绘流畅描线。</span>
+                      <span><b>现有方法</b>：沿用原来的像素分区管线，便于对照。</span>
                       <span><b>FH + RAG（实验）</b>：偏向保留细节，用于观察分区上限。</span>
                       <span><b>多尺度融合（实验）</b>：高阈值粗层负责干净，低阈值细层只恢复有明确边界证据的字孔、高光和小图标。</span>
                       <em>这里只切换算法，不会自动改动你的其他参数。</em>
@@ -73,8 +74,37 @@
                   </span>
                   <small>稳定管线 / 拓扑保护实验</small>
                 </span>
-                <select id="segmentationMethod"><option value="existing">现有方法</option><option value="fh-rag">FH + RAG（实验）</option><option value="hierarchical-fusion">多尺度融合（实验）</option></select>
+                <select id="segmentationMethod"><option value="vtracer" selected>Inkline 曲线</option><option value="existing">现有方法</option><option value="fh-rag">FH + RAG（实验）</option><option value="hierarchical-fusion">多尺度融合（实验）</option></select>
               </label>
+              <label class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-vtracer-colors">
+                    <strong>曲线色数</strong>
+                    <span class="parameter-tooltip" id="tip-vtracer-colors" role="tooltip">
+                      <span>限制 VTracer 的最多颜色数；每个输出色块内部仍是单一 RGB 颜色。</span>
+                      <span><b>16</b>：实图测试中噪声、明暗结构和性能的最佳平衡。</span>
+                    </span>
+                  </span>
+                  <small>VTracer 最大颜色 · 4–64</small>
+                </span>
+                <input id="vtracerColors" type="number" min="4" max="64" step="1" value="16" />
+              </label>
+              <div class="parameter-row">
+                <span>
+                  <span class="parameter-help" tabindex="0" aria-describedby="tip-legacy-ink">
+                    <strong>消除旧描边</strong>
+                    <span class="parameter-tooltip" id="tip-legacy-ink" role="tooltip">
+                      <span>只把夹在不同颜色之间的深色窄带重新归属给两侧色块，再统一重绘边界。</span>
+                      <em>默认关闭；复杂眼睛、深色衣物和内部结构需要人工检查。</em>
+                    </span>
+                  </span>
+                  <small>保守识别 · 建议按图开启</small>
+                </span>
+                <label class="switch-control" aria-label="消除旧描边">
+                  <input id="legacyInkRemoval" type="checkbox" />
+                  <span class="switch-track" aria-hidden="true"><span></span></span>
+                </label>
+              </div>
               <label class="parameter-row">
                 <span>
                   <span class="parameter-help" tabindex="0" aria-describedby="tip-local-threshold">

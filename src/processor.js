@@ -4,6 +4,8 @@ import { fuseHierarchicalLayers } from "./prototype-hierarchical-fusion.js";
 export const DEFAULT_PARAMS = Object.freeze({
   autoMode: true,
   segmentationMethod: "existing",
+  vtracerColors: 16,
+  legacyInkRemoval: false,
   localThreshold: 0.024,
   globalThreshold: 0.06,
   minRegionArea: 9,
@@ -42,6 +44,7 @@ export function validateParams(input) {
     ["minRegionArea", p.minRegionArea, 1, 1_000_000],
     ["minInnerAreaRatio", p.minInnerAreaRatio, 0, 1],
     ["outlineWidth", p.outlineWidth, 1, 8],
+    ["vtracerColors", p.vtracerColors, 4, 64],
     ["preSmoothLevel", p.preSmoothLevel, 0, 5]
   ];
   for (const [name, value, min, max] of numeric) {
@@ -49,12 +52,14 @@ export function validateParams(input) {
   }
   if (p.globalThreshold + EPSILON < p.localThreshold) throw new Error("全局色差阈值必须大于或等于局部色差阈值。");
   if (![4, 8].includes(Number(p.connectivity))) throw new Error("邻接方式只能是 4 或 8。");
-  if (!["existing", "fh-rag", "hierarchical-fusion"].includes(p.segmentationMethod)) throw new Error("未知的分割方法。");
+  if (!["vtracer", "existing", "fh-rag", "hierarchical-fusion"].includes(p.segmentationMethod)) throw new Error("未知的分割方法。");
+  if (typeof p.legacyInkRemoval !== "boolean") throw new Error("旧描边消除参数无效。");
   if (!Array.isArray(p.outlineColor) || p.outlineColor.length !== 3 || p.outlineColor.some((v) => !Number.isInteger(v) || v < 0 || v > 255)) {
     throw new Error("描边颜色必须是有效的 RGB 三元组。");
   }
   p.minRegionArea = Math.round(p.minRegionArea);
   p.outlineWidth = Math.round(p.outlineWidth);
+  p.vtracerColors = Math.round(p.vtracerColors);
   p.preSmoothLevel = Math.round(p.preSmoothLevel);
   p.connectivity = Number(p.connectivity);
   return p;

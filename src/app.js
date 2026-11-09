@@ -15,8 +15,8 @@ const elements = {
   controlsPanel: $("#controlsPanel")
 };
 
-const paramIds = ["segmentationMethod", "localThreshold", "globalThreshold", "minRegionArea", "minInnerAreaRatio", "outlineWidth", "outlineColor", "preSmoothLevel", "connectivity"];
-const autoManagedIds = new Set(paramIds.filter((id) => id !== "segmentationMethod"));
+const paramIds = ["segmentationMethod", "vtracerColors", "legacyInkRemoval", "localThreshold", "globalThreshold", "minRegionArea", "minInnerAreaRatio", "outlineWidth", "outlineColor", "preSmoothLevel", "connectivity"];
+const autoManagedIds = new Set(paramIds.filter((id) => !["segmentationMethod", "vtracerColors", "legacyInkRemoval"].includes(id)));
 const state = {
   image: null,
   file: null,
@@ -65,6 +65,8 @@ function readParams() {
   const params = {
     autoMode: elements.autoMode.checked,
     segmentationMethod: $("#segmentationMethod").value,
+    vtracerColors: Number($("#vtracerColors").value),
+    legacyInkRemoval: $("#legacyInkRemoval").checked,
     localThreshold: Number($("#localThreshold").value) / 100,
     globalThreshold: Number($("#globalThreshold").value) / 100,
     minRegionArea: Number($("#minRegionArea").value),
@@ -75,6 +77,7 @@ function readParams() {
     connectivity: Number($("#connectivity").value)
   };
   const errors = [];
+  if (!Number.isInteger(params.vtracerColors) || params.vtracerColors < 4 || params.vtracerColors > 64) errors.push("曲线色数需为 4–64 的整数。");
   if (!Number.isFinite(params.localThreshold) || params.localThreshold < 0 || params.localThreshold > 1) errors.push("局部色差需在 0–100 之间。");
   if (!Number.isFinite(params.globalThreshold) || params.globalThreshold < params.localThreshold) errors.push("全局色差必须大于或等于局部色差。");
   if (!Number.isInteger(params.minRegionArea) || params.minRegionArea < 1) errors.push("最小色块必须是大于 0 的整数。");
@@ -89,6 +92,8 @@ function readParams() {
 function writeParams(params) {
   if (!params) return;
   if (params.segmentationMethod) $("#segmentationMethod").value = params.segmentationMethod;
+  if (params.vtracerColors !== undefined) $("#vtracerColors").value = Math.round(params.vtracerColors);
+  if (params.legacyInkRemoval !== undefined) $("#legacyInkRemoval").checked = Boolean(params.legacyInkRemoval);
   $("#localThreshold").value = (params.localThreshold * 100).toFixed(1);
   $("#globalThreshold").value = (params.globalThreshold * 100).toFixed(1);
   $("#minRegionArea").value = Math.round(params.minRegionArea);
@@ -150,7 +155,78 @@ function processCurrentImage() {
   state.worker.postMessage({ type: "PROCESS", requestId, image, params }, [image.data.buffer]);
 }
 
-function handleWorkerMessage(event) {
+async function rasterizeSvg(svg, width, height) {
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  const image = new Image();
+  image.decoding = "async";
+  image.src = url;
+  try {
+    await image.decode();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.clearRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  return context.getImageData(0, 0, width, height).data;
+}
+
+function vectorFillPalette(svg) {
+  const colors = new Set();
+  for (const match of svg.matchAll(/\bfill="#([0-9a-f]{6})"/gi)) colors.add(Number.parseInt(match[1], 16));
+  return colors;
+}
+
+async function rasterizeVectorOutput(output) {
+  const started = performance.now();
+  const [flatRGBA, outlinedRGBA] = await Promise.all([
+    rasterizeSvg(output.flatSvg, output.width, output.height),
+    rasterizeSvg(output.outlinedSvg, output.width, output.height)
+  ]);
+  const boundaryMask = new Uint8Array(output.width * output.height);
+  const palette = vectorFillPalette(output.flatSvg);
+  let boundaryPixelCount = 0;
+  let validationViolations = 0;
+  for (let i = 0; i < boundaryMask.length; i++) {
+    const offset = i * 4;
+    const difference = Math.max(
+      Math.abs(flatRGBA[offset] - outlinedRGBA[offset]),
+      Math.abs(flatRGBA[offset + 1] - outlinedRGBA[offset + 1]),
+      Math.abs(flatRGBA[offset + 2] - outlinedRGBA[offset + 2]),
+      Math.abs(flatRGBA[offset + 3] - outlinedRGBA[offset + 3])
+    );
+    if (difference <= 3) continue;
+    boundaryMask[i] = 1;
+    boundaryPixelCount++;
+  }
+  for (let i = 0; i < boundaryMask.length; i++) {
+    const offset = i * 4;
+    if (boundaryMask[i] || flatRGBA[offset + 3] === 0) continue;
+    const color = (flatRGBA[offset] << 16) | (flatRGBA[offset + 1] << 8) | flatRGBA[offset + 2];
+    if (!palette.has(color)) validationViolations++;
+  }
+  const warnings = [...output.stats.warnings];
+  if (validationViolations) warnings.unshift(`${validationViolations.toLocaleString()} 个非边界像素受到栅格抗锯齿混色；请检查透明边缘。`);
+  return {
+    width: output.width,
+    height: output.height,
+    flatRGBA,
+    outlinedRGBA,
+    boundaryMask,
+    stats: {
+      ...output.stats,
+      boundaryPixelCount,
+      elapsedMs: output.stats.elapsedMs + Math.round(performance.now() - started),
+      warnings,
+      validation: { passed: validationViolations === 0, violations: validationViolations }
+    }
+  };
+}
+
+async function handleWorkerMessage(event) {
   const message = event.data;
   if (message.requestId !== state.requestId) return;
   if (message.type === "PROGRESS") {
@@ -158,29 +234,47 @@ function handleWorkerMessage(event) {
     return;
   }
   if (message.type === "ANALYZED") {
+    const current = readParams().params;
     if (elements.autoMode.checked) {
-      const current = readParams().params;
-      writeParams({ ...message.analysis.params, segmentationMethod: current.segmentationMethod, outlineColor: current.outlineColor });
+      if (current.segmentationMethod !== "vtracer") {
+        writeParams({ ...message.analysis.params, segmentationMethod: current.segmentationMethod, vtracerColors: current.vtracerColors, legacyInkRemoval: current.legacyInkRemoval, outlineColor: current.outlineColor });
+      }
     }
     const metric = message.analysis.metrics;
-    setStatus("参数估计完成", `${metric.reason} · 采样 ${metric.sampledEdges.toLocaleString()} 条相邻边`, 0, "done");
+    const vectorMode = current.segmentationMethod === "vtracer";
+    setStatus(
+      vectorMode ? "曲线预设已就绪" : "参数估计完成",
+      vectorMode ? "Poster 色块 · Cutout 共享边界 · Spline 曲线" : `${metric.reason} · 采样 ${metric.sampledEdges.toLocaleString()} 条相邻边`,
+      0,
+      "done"
+    );
     setResultState("INPUT READY");
-    renderEffectiveParams({ ...message.analysis.params, segmentationMethod: $("#segmentationMethod").value }, true);
+    renderEffectiveParams(vectorMode ? current : { ...message.analysis.params, segmentationMethod: $("#segmentationMethod").value }, true);
     renderWarnings(message.analysis.warnings);
     elements.processButton.disabled = false;
     return;
   }
   if (message.type === "DONE") {
-    state.processing = false;
-    state.result = message.output;
-    state.dirty = false;
-    elements.processButton.disabled = false;
-    elements.processButton.querySelector("span").textContent = "再次处理";
-    elements.downloadButton.disabled = false;
-    setStatus("处理完成", `${message.output.stats.finalRegionCount.toLocaleString()} 个最终区域 · 导出保持 ${message.output.width} × ${message.output.height}`, 100, "done");
-    setResultState("VERIFIED", "ready");
-    renderResult(message.output);
-    if (state.activeView === "original") setActiveView("final");
+    try {
+      let output = message.output;
+      if (output.flatSvg) {
+        setStatus("正在生成最终 PNG", "浏览器本地栅格化曲线与描边", 88, "working");
+        output = await rasterizeVectorOutput(output);
+        if (message.requestId !== state.requestId) return;
+      }
+      state.processing = false;
+      state.result = output;
+      state.dirty = false;
+      elements.processButton.disabled = false;
+      elements.processButton.querySelector("span").textContent = "再次处理";
+      elements.downloadButton.disabled = false;
+      setStatus("处理完成", `${output.stats.finalRegionCount.toLocaleString()} 个最终区域 · 导出保持 ${output.width} × ${output.height}`, 100, "done");
+      setResultState("VERIFIED", "ready");
+      renderResult(output);
+      if (state.activeView === "original") setActiveView("final");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+    }
     return;
   }
   if (message.type === "ERROR") showError(message.message);
@@ -341,10 +435,21 @@ function renderResult(output) {
 function renderEffectiveParams(params, estimated) {
   if (!params) return;
   const methodLabel = {
+    vtracer: "Inkline 曲线 · VTRACER",
     existing: "现有方法 · STABLE",
     "fh-rag": "FH + RAG · EXPERIMENTAL",
     "hierarchical-fusion": "多尺度融合 · EXPERIMENTAL"
   }[params.segmentationMethod] || params.segmentationMethod;
+  if (params.segmentationMethod === "vtracer") {
+    elements.effectiveList.innerHTML = `
+      <div><dt>分割方法</dt><dd>${escapeHtml(methodLabel)}</dd></div>
+      <div><dt>曲线策略</dt><dd>POSTER / CUTOUT / SPLINE</dd></div>
+      <div><dt>最大颜色 / 碎片门槛</dt><dd>${Math.round(params.vtracerColors)} / ${Math.round(params.minRegionArea)} px</dd></div>
+      <div><dt>线宽 / 旧描边</dt><dd>${params.outlineWidth} px / ${params.legacyInkRemoval ? "ON" : "OFF"}</dd></div>
+      ${estimated ? "<div><dt>状态</dt><dd>REAL-IMAGE PRESET</dd></div>" : ""}
+    `;
+    return;
+  }
   elements.effectiveList.innerHTML = `
     <div><dt>分割方法</dt><dd>${escapeHtml(methodLabel)}</dd></div>
     <div><dt>局部 / 全局色差</dt><dd>${(params.localThreshold * 100).toFixed(1)} / ${(params.globalThreshold * 100).toFixed(1)} ΔOK×100</dd></div>
@@ -384,7 +489,7 @@ function markDirty() {
 
 function resetParams() {
   writeParams({
-    segmentationMethod: "existing",
+    segmentationMethod: "vtracer", vtracerColors: 16, legacyInkRemoval: false,
     localThreshold: 0.024, globalThreshold: 0.06, minRegionArea: 9, minInnerAreaRatio: 0.8,
     outlineWidth: 2, outlineColor: [21, 21, 21], preSmoothLevel: 0, connectivity: 4
   });
@@ -406,6 +511,7 @@ function downloadResult() {
     const link = document.createElement("a");
     const baseName = (state.file?.name || "image").replace(/\.[^.]+$/, "");
     const methodSuffix = {
+      vtracer: "inkline-vtracer",
       existing: "existing",
       "fh-rag": "fh-rag",
       "hierarchical-fusion": "multiscale-fusion"
